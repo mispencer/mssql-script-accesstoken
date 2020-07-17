@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SQLScriptExecutor": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}

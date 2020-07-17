@@ -1,0 +1,6 @@
+*.cs      text
+*.csproj  eol=crlf
+*.sln     eol=crlf
+*.json      text
+.dockerignore      text
+Dockerfile      text
