@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.Azure.Services.AppAuthentication;
 using System.Runtime.CompilerServices;
 
-namespace SQLScriptExecutor {
+namespace MSSQLScriptExecutor {
     class Program {
         async static Task<int> Main(string[] args) {
             var rootCommand = new RootCommand();
@@ -53,28 +53,28 @@ namespace SQLScriptExecutor {
                 }
                 return null;
             });
-            scriptCommand.Description = "Run a sql script against a MSSQL database using an azure access token";
+            scriptCommand.Description = "Run a SQL script against a MSSQL database";
             scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo, string>(ExecuteScript);
             rootCommand.Add(scriptCommand);
 
             var addUserCommand = new Command("add-ad-user") {
                 new Option<string>(
                     "--user-display-name",
-                    description: "Display Name of user") {
+                    description: "The display name of the user") {
                         Required = true
                     },
                 new Option<Guid>(
                     "--user-object-id",
-                    description: "Object id of user") {
+                    description: "The object id of the user") {
                         Required = true
                     },
                 new Option<string>(
                     "--user-type",
                     getDefaultValue: () => "E",
-                    description: "Type of user"),
+                    description: "The one-character type of the user as listed in sys.database_principals"),
             };
             addUserCommand.Handler = CommandHandler.Create<bool, bool,string, string, Guid, string>(AddUser);
-            addUserCommand.Description = "Add AD user by Object ID";
+            addUserCommand.Description = "Add a user by Object ID";
             rootCommand.Add(addUserCommand);
 
             foreach(var option in rootOptions) {
@@ -85,45 +85,45 @@ namespace SQLScriptExecutor {
         }
 
         static async Task AddUser(bool verbose, bool useAzureAccessToken, string connectionString, string userDisplayName, Guid userObjectId, string userType) {
-            WriteVerbose(verbose, "Starting");
+            WriteVerbose(verbose, "Starting...");
             using var connection = await GetConnection(verbose, useAzureAccessToken, connectionString);
 
-            WriteVerbose(verbose, "Checking if user already exists");
+            WriteVerbose(verbose, "Checking if the user already exists...");
             using var countCmd = connection.CreateCommand();
             countCmd.CommandText = "SELECT COUNT(*) FROM sys.database_principals WHERE name = @displayName";
             countCmd.Parameters.AddWithValue("displayName", userDisplayName);
             var count = (int)countCmd.ExecuteScalar();
             await countCmd.DisposeAsync();
             if (count > 0) {
-                WriteVerbose(verbose, "User already exists");
+                WriteVerbose(verbose, "WARNING: the user already exists - aborting");
                 return;
             }
 
-            WriteVerbose(verbose, "Fetching SID");
+            WriteVerbose(verbose, "Converting object id of the user to an SID...");
             using var guidStringCmd = connection.CreateCommand();
             guidStringCmd.CommandText = "SELECT CONVERT(VARCHAR(1000), CAST(CAST(@objectId AS UNIQUEIDENTIFIER) AS VARBINARY(16)),1) SID";
             guidStringCmd.Parameters.AddWithValue("objectId", userObjectId.ToString());
             var guidString = await guidStringCmd.ExecuteScalarAsync();
             await guidStringCmd.DisposeAsync();
 
-            WriteVerbose(verbose, "Creating User SID");
+            WriteVerbose(verbose, "Creating user...");
             using var addUserCommand = connection.CreateCommand();
             guidStringCmd.CommandText = $"CREATE USER [{userDisplayName}] WITH SID={guidString}, TYPE={userType};";
             guidStringCmd.ExecuteNonQuery();
-            WriteVerbose(verbose, "Done");
+            WriteVerbose(verbose, "DONE");
         }
 
         private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql) {
-            WriteVerbose(verbose, "Starting");
+            WriteVerbose(verbose, "Starting...");
             if (sqlFile != null) {
                 using var batchReader = sqlFile.OpenText();
                 sql = batchReader.ReadToEnd();
             }
 
             var connection = await GetConnection(verbose, useAzureAccessToken, connectionString);
-            WriteVerbose(verbose, "Executing sql");
+            WriteVerbose(verbose, "Executing sql...");
             await connection.ExecuteSqlScript(sql, message => WriteVerbose(verbose, message));
-            WriteVerbose(verbose, "Done");
+            WriteVerbose(verbose, "DONE");
         }
 
         private static void WriteVerbose(bool verbose, string message) {
@@ -137,11 +137,10 @@ namespace SQLScriptExecutor {
             var connection = new SqlConnection(connectionString);
             if (useAzureAccessToken) {
                 var tokenProvider = new AzureServiceTokenProvider();
-                WriteVerbose(verbose, "Fetching token");
+                WriteVerbose(verbose, "Fetching token...");
                 connection.AccessToken = await tokenProvider.GetAccessTokenAsync("https://database.windows.net/");
-                WriteVerbose(verbose, "Fetched token");
             }
-            WriteVerbose(verbose, "Opening connection");
+            WriteVerbose(verbose, "Opening connection...");
             await connection.OpenAsync();
             return connection;
         }
@@ -161,7 +160,8 @@ namespace SQLScriptExecutor {
                 string.Format(CultureInfo.InvariantCulture, @"^\s*({0}[ \t]+[0-9]+|{0})(?:\s+|$)", BatchTerminator),
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
-            writeVerbose($"Batch count: {batches.Length}");
+            writeVerbose($"Batches to run: {batches.Length}");
+            writeVerbose($"(some may be empty)");
 
             for (int i = 0; i < batches.Length; ++i)
             {
@@ -169,18 +169,17 @@ namespace SQLScriptExecutor {
                 if (batches[i].StartsWith(BatchTerminator, StringComparison.OrdinalIgnoreCase) ||
                     (i == batches.Length - 1 && string.IsNullOrWhiteSpace(batches[i])))
                 {
-                    writeVerbose($"Skipping batch {i}");
+                    writeVerbose($"Skipping batch {i} as it is empty");
                     continue;
                 }
 
                 async Task RunCommand(string sql)
                 {
-                    writeVerbose("Running:");
-                    writeVerbose(sql);
+                    writeVerbose("Running batch {i}...");
                     var command = sqlConnection.CreateCommand();
                     command.CommandText = sql; ;
                     var resultCount = await command.ExecuteNonQueryAsync();
-                    writeVerbose($"Result Count: {resultCount}");
+                    writeVerbose($"Batch {i} result count is {resultCount}");
                 }
 
                 // Include batch terminator if the next element is a batch terminator
@@ -193,12 +192,16 @@ namespace SQLScriptExecutor {
                     if (!string.Equals(batches[i + 1], BatchTerminator, StringComparison.OrdinalIgnoreCase))
                     {
                         repeatCount = int.Parse(Regex.Match(batches[i + 1], @"([0-9]+)").Value, CultureInfo.InvariantCulture);
+                        writeVerbose($"Batch {i} is repeated {repeatCount} times");
                     }
-                    writeVerbose($"Repeat Count for {i}: {repeatCount}");
 
+                    var sql = batches[i];
+
+                    writeVerbose("Batch {i} is:");
+                    writeVerbose(sql);
                     for (int j = 0; j < repeatCount; ++j)
                     {
-                        await RunCommand(batches[i]);
+                        await RunCommand(sql);
                     }
                 }
                 else

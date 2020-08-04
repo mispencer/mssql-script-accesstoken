@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "SQLScriptExecutor": {
+    "MSSQLScriptExecutor": {
       "commandName": "Project"
     },
     "Docker": {

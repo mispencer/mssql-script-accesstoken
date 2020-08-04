@@ -5,16 +5,16 @@ WORKDIR /app
 
 FROM mcr.microsoft.com/dotnet/core/sdk:3.1-buster AS build
 WORKDIR /src
-COPY ["SQLScriptExecutor.csproj", ""]
-RUN dotnet restore "./SQLScriptExecutor.csproj"
+COPY ["MSSQLScriptExecutor.csproj", ""]
+RUN dotnet restore "./MSSQLScriptExecutor.csproj"
 COPY . .
 WORKDIR "/src/."
-RUN dotnet build "SQLScriptExecutor.csproj" -c Release -o /app/build
+RUN dotnet build "MSSQLScriptExecutor.csproj" -c Release -o /app/build
 
 FROM build AS publish
-RUN dotnet publish "SQLScriptExecutor.csproj" -c Release -o /app/publish
+RUN dotnet publish "MSSQLScriptExecutor.csproj" -c Release -o /app/publish
 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "SQLScriptExecutor.dll"]
+ENTRYPOINT ["dotnet", "MSSQLScriptExecutor.dll"]
