@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.IO;
 using System.Data.SqlClient;
 using System.Globalization;
@@ -12,8 +14,8 @@ using System.Runtime.CompilerServices;
 namespace SQLScriptExecutor {
     class Program {
         async static Task<int> Main(string[] args) {
-            var rootCommand = new RootCommand {
-                /*
+            var rootCommand = new RootCommand();
+            var rootOptions = new List<Option> {
                 new Option<bool>(
                     "--use-azure-access-token",
                     getDefaultValue: () => false,
@@ -24,34 +26,35 @@ namespace SQLScriptExecutor {
                     description: "Whether to write logs to console"),
                 new Option<string>(
                     "--connection-string",
-                    description: "the database connection string") {
+                    description: "The database connection string") {
                         Required = true 
                     },
-                */
             };
 
             var scriptCommand = new Command("script") {
                 new Option<FileInfo>(
                     "--sql-file",
-                    description: "Path to a batch sql file") {
-                        Required = true
+                    description: "Path to a batch SQL file to be ran") {
+                        Required = false,
+                        Argument = new Argument<FileInfo>().ExistingOnly(),
                     },
-                new Option<bool>(
-                    "--use-azure-access-token",
-                    getDefaultValue: () => false,
-                    description: "Whether to connect with a Azure AD access token"),
-                new Option<bool>(
-                    "--verbose",
-                    getDefaultValue: () => true,
-                    description: "Whether to write logs to console"),
                 new Option<string>(
-                    "--connection-string",
-                    description: "the database connection string") {
-                        Required = true 
+                    "--sql",
+                    description: "Batch SQL to be ran") {
+                        Required = false
                     },
             };
+            scriptCommand.AddValidator(commandResult => {
+                if (commandResult.Children.Contains("sql") && commandResult.Children.Contains("sql-file")) {
+                    return "Options '--sql-file' and '--sql' cannot be used together.";
+                }
+                if (!commandResult.Children.Contains("sql") && !commandResult.Children.Contains("sql-file")) {
+                    return "One of '--sql-file' and '--sql' must be supplied.";
+                }
+                return null;
+            });
             scriptCommand.Description = "Run a sql script against a MSSQL database using an azure access token";
-            scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo>(ExecuteScript);
+            scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo, string>(ExecuteScript);
             rootCommand.Add(scriptCommand);
 
             var addUserCommand = new Command("add-ad-user") {
@@ -69,23 +72,14 @@ namespace SQLScriptExecutor {
                     "--user-type",
                     getDefaultValue: () => "E",
                     description: "Type of user"),
-                new Option<bool>(
-                    "--use-azure-access-token",
-                    getDefaultValue: () => false,
-                    description: "Whether to connect with a Azure AD access token"),
-                new Option<bool>(
-                    "--verbose",
-                    getDefaultValue: () => true,
-                    description: "Whether to write logs to console"),
-                new Option<string>(
-                    "--connection-string",
-                    description: "the database connection string") {
-                        Required = true 
-                    },
             };
             addUserCommand.Handler = CommandHandler.Create<bool, bool,string, string, Guid, string>(AddUser);
             addUserCommand.Description = "Add AD user by Object ID";
             rootCommand.Add(addUserCommand);
+
+            foreach(var option in rootOptions) {
+                rootCommand.AddGlobalOption(option);
+            }
 
             return await rootCommand.InvokeAsync(args);
         }
@@ -119,14 +113,16 @@ namespace SQLScriptExecutor {
             WriteVerbose(verbose, "Done");
         }
 
-        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile) {
+        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql) {
             WriteVerbose(verbose, "Starting");
-            using var batchReader = sqlFile.OpenText();
-            var batchSql = batchReader.ReadToEnd();
+            if (sqlFile != null) {
+                using var batchReader = sqlFile.OpenText();
+                sql = batchReader.ReadToEnd();
+            }
 
             var connection = await GetConnection(verbose, useAzureAccessToken, connectionString);
             WriteVerbose(verbose, "Executing sql");
-            await connection.ExecuteSqlScript(batchSql, message => WriteVerbose(verbose, message));
+            await connection.ExecuteSqlScript(sql, message => WriteVerbose(verbose, message));
             WriteVerbose(verbose, "Done");
         }
 
