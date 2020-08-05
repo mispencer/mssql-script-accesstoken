@@ -161,7 +161,7 @@ namespace MSSQLScriptExecutor {
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
             writeVerbose($"Batches to run: {batches.Length}");
-            writeVerbose($"(some may be empty)");
+            writeVerbose("(some may be empty)");
 
             for (int i = 0; i < batches.Length; ++i)
             {
@@ -175,7 +175,7 @@ namespace MSSQLScriptExecutor {
 
                 async Task RunCommand(string sql)
                 {
-                    writeVerbose("Running batch {i}...");
+                    writeVerbose($"Running batch {i}...");
                     var command = sqlConnection.CreateCommand();
                     command.CommandText = sql; ;
                     var resultCount = await command.ExecuteNonQueryAsync();
@@ -197,7 +197,7 @@ namespace MSSQLScriptExecutor {
 
                     var sql = batches[i];
 
-                    writeVerbose("Batch {i} is:");
+                    writeVerbose($"Batch {i} is:");
                     writeVerbose(sql);
                     for (int j = 0; j < repeatCount; ++j)
                     {
