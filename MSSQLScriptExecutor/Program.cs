@@ -144,7 +144,8 @@ namespace MSSQLScriptExecutor {
             if (useAzureAccessToken) {
                 var tokenProvider = new AzureServiceTokenProvider();
                 WriteVerbose(verbose, "Fetching token...");
-                connection.AccessToken = await tokenProvider.GetAccessTokenAsync("https://database.windows.net/");
+                var tokenDomain = connectionString.Contains("database.usgovcloudapi.net") ? "usgovcloudapi" : "windows";
+                connection.AccessToken = await tokenProvider.GetAccessTokenAsync($"https://database.{tokenDomain}.net/");
             }
             WriteVerbose(verbose, "Opening connection...");
             await connection.OpenAsync();
