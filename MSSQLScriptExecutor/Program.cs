@@ -8,8 +8,8 @@ using System.Data.SqlClient;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Microsoft.Azure.Services.AppAuthentication;
-using System.Runtime.CompilerServices;
+using Azure.Core;
+using Azure.Identity;
 
 namespace MSSQLScriptExecutor {
     class Program {
@@ -142,10 +142,11 @@ namespace MSSQLScriptExecutor {
         private static async Task<SqlConnection> GetConnection(bool verbose, bool useAzureAccessToken, string connectionString) {
             var connection = new SqlConnection(connectionString);
             if (useAzureAccessToken) {
-                var tokenProvider = new AzureServiceTokenProvider();
                 WriteVerbose(verbose, "Fetching token...");
-                var tokenDomain = connectionString.Contains("database.usgovcloudapi.net") ? "usgovcloudapi" : "windows";
-                connection.AccessToken = await tokenProvider.GetAccessTokenAsync($"https://database.{tokenDomain}.net/");
+                var tokenDomainRoot = connectionString.Contains("database.usgovcloudapi.net") ? "usgovcloudapi" : "windows";
+                var tokenRequestContext = new TokenRequestContext(new[] { $"https://database.{tokenDomainRoot}.net//.default" });
+                var token = await new DefaultAzureCredential().GetTokenAsync(tokenRequestContext, System.Threading.CancellationToken.None);
+                connection.AccessToken = token.Token;
             }
             WriteVerbose(verbose, "Opening connection...");
             await connection.OpenAsync();
