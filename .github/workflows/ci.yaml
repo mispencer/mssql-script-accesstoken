@@ -8,7 +8,9 @@ name: Publish Docker image
 on:
   workflow_dispatch:
   push:
-    branches: [ master ]
+    branches: 
+    - master
+    - next
   schedule:
     - cron:  '18 7 8 * *'
 
