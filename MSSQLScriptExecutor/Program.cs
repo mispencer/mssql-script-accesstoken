@@ -200,7 +200,7 @@ namespace MSSQLScriptExecutor {
                         while(await reader.ReadAsync()) {
                             for(int i = 0; i < reader.FieldCount; i++) {
                                 var v = reader.GetValue(i);
-                                resultSize += v is string vS ? vS.Length : v is long ? 8 : v is int ? 4 : v is short ? 2 : v is byte ? 1 : v is DateTime ? 8 : throw new Exception(v.GetType().FullName);
+                                resultSize += v is string vS ? vS.Length : v is long ? 8 : v is int ? 4 : v is short ? 2 : v is byte ? 1 : v is DateTime ? 8 : v is bool ? 1 : throw new Exception(v.GetType().FullName);
                             }
                             resultCount++;
                         }
