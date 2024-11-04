@@ -234,16 +234,34 @@ namespace MSSQLScriptExecutor {
                     command.CommandTimeout = commandTimeout;
                     AddParameters(command, parameters);
                     int resultCount;
+                    int resultSize = 0;
                     if (read) {
                         var reader = command.ExecuteReader();
                         resultCount = 0;
                         while(await reader.ReadAsync()) {
+                            for(int i = 0; i < reader.FieldCount; i++) {
+                                var v = reader.GetValue(i);
+                                resultSize += v is string vS ? vS.Length 
+                                    : v is long ? 8
+                                    : v is int ? 4 
+                                    : v is short ? 2
+                                    : v is byte ? 1
+                                    : v is DateTime ? 8
+                                    : v is bool ? 1
+                                    : v is DBNull ? 1
+                                    : v is decimal ? 16
+                                    : v is double ? 8
+                                    : v is float ? 4
+                                    : v is Guid ? 16
+                                    : v is byte[] bA ? bA.Length
+                                    : throw new Exception(v.GetType().FullName);
+                            }
                             resultCount++;
                         }
                     } else {
                         resultCount = await command.ExecuteNonQueryAsync();
                     }
-                    writeVerbose($"Batch {i} result count is {resultCount}");
+                    writeVerbose($"Batch {i} result count is {resultCount} (size {resultSize})");
                 }
 
                 // Include batch terminator if the next element is a batch terminator
