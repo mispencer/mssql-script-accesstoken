@@ -212,6 +212,7 @@ namespace MSSQLScriptExecutor {
                                     : v is double ? 8
                                     : v is float ? 4
                                     : v is Guid ? 16
+                                    : v is byte[] bA ? bA.Length
                                     : throw new Exception(v.GetType().FullName);
                             }
                             resultCount++;
