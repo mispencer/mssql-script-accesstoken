@@ -49,6 +49,11 @@ namespace MSSQLScriptExecutor {
                     description: "Timeout on each script batch in seconds") {
                         Required = false
                     },
+                new Option<bool>(
+                    "--read",
+                    description: "Whither to attempt to read the result") {
+                        Required = false
+                    },
             };
             scriptCommand.AddValidator(commandResult => {
                 if (commandResult.Children.Contains("sql") && commandResult.Children.Contains("sql-file")) {
@@ -60,7 +65,7 @@ namespace MSSQLScriptExecutor {
                 return null;
             });
             scriptCommand.Description = "Run a SQL script against a MSSQL database";
-            scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo, string, int>(ExecuteScript);
+            scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo, string, int, bool>(ExecuteScript);
             rootCommand.Add(scriptCommand);
 
             var addUserCommand = new Command("add-ad-user") {
@@ -119,7 +124,7 @@ namespace MSSQLScriptExecutor {
             WriteVerbose(verbose, "DONE");
         }
 
-        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql, int timeout) {
+        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql, int timeout, bool read) {
             WriteVerbose(verbose, "Starting...");
             if (sqlFile != null) {
                 using var batchReader = sqlFile.OpenText();
@@ -128,7 +133,7 @@ namespace MSSQLScriptExecutor {
 
             var connection = await GetConnection(verbose, useAzureAccessToken, connectionString);
             WriteVerbose(verbose, "Executing sql...");
-            await connection.ExecuteSqlScript(sql, timeout, message => WriteVerbose(verbose, message));
+            await connection.ExecuteSqlScript(sql, timeout, message => WriteVerbose(verbose, message), read);
             WriteVerbose(verbose, "DONE");
         }
 
@@ -157,7 +162,7 @@ namespace MSSQLScriptExecutor {
     //Based on https://stackoverflow.com/a/52443620
     internal static class SqlCommandExtensions {
         private const string BatchTerminator = "GO";
-        public static async Task ExecuteSqlScript(this SqlConnection sqlConnection, string sqlBatch, int commandTimeout, Action<string> writeVerbose)
+        public static async Task ExecuteSqlScript(this SqlConnection sqlConnection, string sqlBatch, int commandTimeout, Action<string> writeVerbose, bool read)
         {
             // Handle backslash utility statement (see http://technet.microsoft.com/en-us/library/dd207007.aspx)
             sqlBatch = Regex.Replace(sqlBatch, @"\\(\r\n|\r|\n)", string.Empty);
@@ -187,7 +192,16 @@ namespace MSSQLScriptExecutor {
                     var command = sqlConnection.CreateCommand();
                     command.CommandText = sql; ;
                     command.CommandTimeout = commandTimeout;
-                    var resultCount = await command.ExecuteNonQueryAsync();
+                    int resultCount;
+                    if (read) {
+                        var reader = command.ExecuteReader();
+                        resultCount = 0;
+                        while(await reader.ReadAsync()) {
+                            resultCount++;
+                        }
+                    } else {
+                        resultCount = await command.ExecuteNonQueryAsync();
+                    }
                     writeVerbose($"Batch {i} result count is {resultCount}");
                 }
 
