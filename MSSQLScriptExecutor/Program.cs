@@ -193,16 +193,21 @@ namespace MSSQLScriptExecutor {
                     command.CommandText = sql; ;
                     command.CommandTimeout = commandTimeout;
                     int resultCount;
+                    int resultSize = 0;
                     if (read) {
                         var reader = command.ExecuteReader();
                         resultCount = 0;
                         while(await reader.ReadAsync()) {
+                            for(int i = 0; i < reader.FieldCount; i++) {
+                                var v = reader.GetValue(i);
+                                resultSize += v is string vS ? vS.Length : v is long ? 8 : v is int ? 4 : v is short ? 2 : v is byte ? 1 : throw new Exception(v.GetType().FullName);
+                            }
                             resultCount++;
                         }
                     } else {
                         resultCount = await command.ExecuteNonQueryAsync();
                     }
-                    writeVerbose($"Batch {i} result count is {resultCount}");
+                    writeVerbose($"Batch {i} result count is {resultCount} (size {resultSize})");
                 }
 
                 // Include batch terminator if the next element is a batch terminator
