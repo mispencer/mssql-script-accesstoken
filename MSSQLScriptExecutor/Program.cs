@@ -49,6 +49,12 @@ namespace MSSQLScriptExecutor {
                     description: "Timeout on each script batch in seconds") {
                         Required = false
                     },
+                new Option<string[]>(
+                    "--param",
+                    description: "SQL parameter assignment (Name=Value)") {
+                        Required = false,
+                        Argument = new Argument<string[]>() { Arity = ArgumentArity.ZeroOrMore }
+                    },
             };
             scriptCommand.AddValidator(commandResult => {
                 if (commandResult.Children.Contains("sql") && commandResult.Children.Contains("sql-file")) {
@@ -60,7 +66,7 @@ namespace MSSQLScriptExecutor {
                 return null;
             });
             scriptCommand.Description = "Run a SQL script against a MSSQL database";
-            scriptCommand.Handler = CommandHandler.Create<bool, bool, string, FileInfo, string, int>(ExecuteScript);
+            scriptCommand.Handler = CommandHandler.Create(new Func<bool, bool, string, FileInfo, string, int, string[], Task>(ExecuteScript));
             rootCommand.Add(scriptCommand);
 
             var addUserCommand = new Command("add-ad-user") {
@@ -79,7 +85,7 @@ namespace MSSQLScriptExecutor {
                     getDefaultValue: () => "E",
                     description: "The one-character type of the user as listed in sys.database_principals"),
             };
-            addUserCommand.Handler = CommandHandler.Create<bool, bool, string, string, Guid, string>(AddUser);
+            addUserCommand.Handler = CommandHandler.Create(new Func<bool, bool, string, string, Guid, string, Task>(AddUser));
             addUserCommand.Description = "Add a user by Object ID";
             rootCommand.Add(addUserCommand);
 
@@ -119,7 +125,7 @@ namespace MSSQLScriptExecutor {
             WriteVerbose(verbose, "DONE");
         }
 
-        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql, int timeout) {
+        private static async Task ExecuteScript(bool verbose, bool useAzureAccessToken, string connectionString, FileInfo sqlFile, string sql, int timeout, string[] param) {
             WriteVerbose(verbose, "Starting...");
             if (sqlFile != null) {
                 using var batchReader = sqlFile.OpenText();
@@ -128,7 +134,8 @@ namespace MSSQLScriptExecutor {
 
             var connection = await GetConnection(verbose, useAzureAccessToken, connectionString);
             WriteVerbose(verbose, "Executing sql...");
-            await connection.ExecuteSqlScript(sql, timeout, message => WriteVerbose(verbose, message));
+            var parameters = BuildSqlParameters(param);
+            await connection.ExecuteSqlScript(sql, timeout, message => WriteVerbose(verbose, message), parameters);
             WriteVerbose(verbose, "DONE");
         }
 
@@ -152,12 +159,45 @@ namespace MSSQLScriptExecutor {
             await connection.OpenAsync();
             return connection;
         }
+
+        private static IReadOnlyDictionary<string, string?> BuildSqlParameters(string[] paramAssignments) {
+            var parameters = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+            if (paramAssignments != null) {
+                foreach (var entry in paramAssignments) {
+                    AddParameter(parameters, entry);
+                }
+            }
+
+            return parameters;
+        }
+
+        private static void AddParameter(IDictionary<string, string?> parameters, string entry) {
+            if (string.IsNullOrWhiteSpace(entry)) {
+                throw new ArgumentException("Parameter assignment cannot be empty.");
+            }
+
+            var splitIndex = entry.IndexOf('=');
+            if (splitIndex <= 0 || splitIndex == entry.Length - 1) {
+                throw new ArgumentException($"Invalid parameter assignment '{entry}'. Use Name=Value.");
+            }
+
+            var name = entry.Substring(0, splitIndex).Trim();
+            var rawValue = entry.Substring(splitIndex + 1);
+
+            if (string.IsNullOrWhiteSpace(name)) {
+                throw new ArgumentException($"Invalid parameter assignment '{entry}'. Name cannot be empty.");
+            }
+
+            var parameterName = name.StartsWith("@", StringComparison.Ordinal) ? name : $"@{name}";
+            parameters[parameterName] = rawValue;
+        }
     }
 
     //Based on https://stackoverflow.com/a/52443620
     internal static class SqlCommandExtensions {
         private const string BatchTerminator = "GO";
-        public static async Task ExecuteSqlScript(this SqlConnection sqlConnection, string sqlBatch, int commandTimeout, Action<string> writeVerbose)
+        public static async Task ExecuteSqlScript(this SqlConnection sqlConnection, string sqlBatch, int commandTimeout, Action<string> writeVerbose, IReadOnlyDictionary<string, string?> parameters)
         {
             // Handle backslash utility statement (see http://technet.microsoft.com/en-us/library/dd207007.aspx)
             sqlBatch = Regex.Replace(sqlBatch, @"\\(\r\n|\r|\n)", string.Empty);
@@ -185,8 +225,9 @@ namespace MSSQLScriptExecutor {
                 {
                     writeVerbose($"Running batch {i}...");
                     var command = sqlConnection.CreateCommand();
-                    command.CommandText = sql; ;
+                    command.CommandText = sql;
                     command.CommandTimeout = commandTimeout;
+                    AddParameters(command, parameters);
                     var resultCount = await command.ExecuteNonQueryAsync();
                     writeVerbose($"Batch {i} result count is {resultCount}");
                 }
@@ -217,6 +258,16 @@ namespace MSSQLScriptExecutor {
                 {
                     await RunCommand(batches[i]);
                 }
+            }
+        }
+
+        private static void AddParameters(SqlCommand command, IReadOnlyDictionary<string, string?> parameters) {
+            if (parameters == null || parameters.Count == 0) {
+                return;
+            }
+
+            foreach (var entry in parameters) {
+                command.Parameters.AddWithValue(entry.Key, entry.Value ?? (object)DBNull.Value);
             }
         }
     }
